@@ -61,14 +61,13 @@ func Test_File(t *testing.T) {
 	checkStatsResponse(t, 33, response.Body.Bytes())
 }
 
-//
-//func Test_URL(t *testing.T) {
-//	req, _ := http.NewRequest("POST", "/count?input=url", strings.NewReader(`{"Input":"tests/file1.txt"}`))
-//	response := executeRequest(req)
-//	checkResponseCode(t, http.StatusAccepted, response.Code)
-//
-//	req, _ = http.NewRequest("GET", "/stats/hello", nil)
-//	response = executeRequest(req)
-//	checkResponseCode(t, http.StatusOK, response.Code)
-//	checkStatsResponse(t, 33, response.Body.Bytes())
-//}
+func Test_URL(t *testing.T) {
+	req, _ := http.NewRequest("POST", "/count?input=url", strings.NewReader(`{"Input":"https://raw.githubusercontent.com/YeruchamB/word-count-server/main/tests/file2.txt"}`))
+	response := executeRequest(req)
+	checkResponseCode(t, http.StatusAccepted, response.Code)
+
+	req, _ = http.NewRequest("GET", "/stats/drift", nil)
+	response = executeRequest(req)
+	checkResponseCode(t, http.StatusOK, response.Code)
+	checkStatsResponse(t, 8, response.Body.Bytes())
+}
