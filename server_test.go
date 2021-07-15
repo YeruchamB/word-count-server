@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,25 +30,26 @@ func checkResponseCode(t *testing.T, expected, actual int) {
 	}
 }
 
-func checkStatsResponse(t *testing.T, expectedCount int64, body []byte) {
+func checkStats(t *testing.T, word string, expectedCount int64) {
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/stats/%s", word), nil)
+	response := executeRequest(req)
+	checkResponseCode(t, http.StatusOK, response.Code)
+
 	var stats StatsResponse
-	err := json.Unmarshal(body, &stats)
+	err := json.Unmarshal(response.Body.Bytes(), &stats)
 	if err != nil {
 		t.Error(err)
 	} else if stats.Count != expectedCount {
-		t.Errorf("Expected 2. Got %d", stats.Count)
+		t.Errorf("Expected %d. Got %d", expectedCount, stats.Count)
 	}
 }
 
 func Test_Text(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"Input":"test test hello world"}`))
+	req, _ := http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"Input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
 	response := executeRequest(req)
 	checkResponseCode(t, http.StatusAccepted, response.Code)
 
-	req, _ = http.NewRequest("GET", "/stats/test", nil)
-	response = executeRequest(req)
-	checkResponseCode(t, http.StatusOK, response.Code)
-	checkStatsResponse(t, 2, response.Body.Bytes())
+	checkStats(t, "my", 3)
 }
 
 func Test_File(t *testing.T) {
@@ -55,10 +57,7 @@ func Test_File(t *testing.T) {
 	response := executeRequest(req)
 	checkResponseCode(t, http.StatusAccepted, response.Code)
 
-	req, _ = http.NewRequest("GET", "/stats/hello", nil)
-	response = executeRequest(req)
-	checkResponseCode(t, http.StatusOK, response.Code)
-	checkStatsResponse(t, 33, response.Body.Bytes())
+	checkStats(t, "hello", 32)
 }
 
 func Test_URL(t *testing.T) {
@@ -66,8 +65,5 @@ func Test_URL(t *testing.T) {
 	response := executeRequest(req)
 	checkResponseCode(t, http.StatusAccepted, response.Code)
 
-	req, _ = http.NewRequest("GET", "/stats/drift", nil)
-	response = executeRequest(req)
-	checkResponseCode(t, http.StatusOK, response.Code)
-	checkStatsResponse(t, 8, response.Body.Bytes())
+	checkStats(t, "drift", 8)
 }
