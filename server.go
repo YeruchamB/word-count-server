@@ -1,88 +1,125 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/mux"
+	"github.com/vladimirvivien/automi/emitters"
+	"log"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
-	"testing"
 )
 
-var s Server
-
-func TestMain(m *testing.M) {
-	s.Initialize()
-	os.Exit(m.Run())
+type Server struct {
+	Router *mux.Router
 }
 
-func executeRequest(req *http.Request) *httptest.ResponseRecorder {
-	rr := httptest.NewRecorder()
-	s.Router.ServeHTTP(rr, req)
-
-	return rr
+type CountRequest struct {
+	Input string `json:"input"`
 }
 
-func checkResponseCode(t *testing.T, expected, actual int) {
-	if expected != actual {
-		t.Errorf("Expected response code %d. Got %d\n", expected, actual)
-	}
+type StatsResponse struct {
+	Word  string `json:"word"`
+	Count int64 `json:"count"`
 }
 
-func checkStats(t *testing.T, word string, expectedCount int64) {
-	req, _ := http.NewRequest("GET", fmt.Sprintf("/stats/%s", word), nil)
-	response := executeRequest(req)
-	checkResponseCode(t, http.StatusOK, response.Code)
+func readFromBody(text string) error {
+	return InputWordCount(strings.NewReader(text))
+}
 
-	var stats StatsResponse
-	err := json.Unmarshal(response.Body.Bytes(), &stats)
+func readFromFile(file string) error {
+	f, err := os.Open(file)
 	if err != nil {
-		t.Error(err)
-	} else if stats.Count != expectedCount {
-		t.Errorf("Expected %d. Got %d", expectedCount, stats.Count)
+		return err
+	}
+	return InputWordCount(emitters.Scanner(f, bufio.ScanLines))
+}
+
+func readFromUrl(url string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check server response
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	return InputWordCount(emitters.Reader(resp.Body))
+}
+
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.WriteHeader(code)
+	if payload != nil {
+		response, _ := json.Marshal(payload)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(response)
 	}
 }
 
-func Test_Text(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
-	response := executeRequest(req)
-	checkResponseCode(t, http.StatusAccepted, response.Code)
-	checkStats(t, "my", 3)
+// Handler for adding input to the word count
+func (s *Server) countHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract the input from the body
+	var countRequest CountRequest
+	err := json.NewDecoder(r.Body).Decode(&countRequest)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+	defer r.Body.Close()
 
-	req, _ = http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
-	response = executeRequest(req)
-	checkResponseCode(t, http.StatusAccepted, response.Code)
-	checkStats(t, "my", 6)
+	// Determine input type based on the 'input' path param
+	switch r.URL.Query().Get("input") {
+	case "text":
+		err = readFromBody(countRequest.Input)
+	case "file":
+		err = readFromFile(countRequest.Input)
+	case "url":
+		err = readFromUrl(countRequest.Input)
+	default:
+		respondWithError(w, http.StatusBadRequest, "Invalid input type")
+		return
+	}
+
+	if err != nil {
+		fmt.Println(err)
+		respondWithError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+	} else {
+		respondWithJSON(w, http.StatusAccepted, nil)
+	}
 }
 
-func Test_File(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=file", strings.NewReader(`{"input":"tests/file1.txt"}`))
-	response := executeRequest(req)
-	checkResponseCode(t, http.StatusAccepted, response.Code)
-	checkStats(t, "hello", 32)
+// Handler for retrieving the stats for a given word
+func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
+	word := mux.Vars(r)["word"]
+
+	// Retrieve the count from the cache
+	count, err := GetCount(strings.ToLower(word))
+	if err != nil {
+		fmt.Println(err)
+		respondWithError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, StatsResponse{Word: word, Count: count})
 }
 
-func Test_URL(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=url", strings.NewReader(`{"input":"https://raw.githubusercontent.com/YeruchamB/word-count-server/main/tests/file2.txt"}`))
-	response := executeRequest(req)
-	checkResponseCode(t, http.StatusAccepted, response.Code)
-	checkStats(t, "drift", 8)
+func (s *Server) Initialize() {
+	InitRedis()
+
+	s.Router = mux.NewRouter()
+	s.Router.HandleFunc("/count", s.countHandler).Methods("POST")
+	s.Router.HandleFunc("/stats/{word:[a-z]+}", s.statsHandler).Methods("GET")
 }
 
-func Test_Errors(t *testing.T) {
-	// Bad input type
-	req, _ := http.NewRequest("POST", "/count?input=bad", strings.NewReader(`{"input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
-	response := executeRequest(req)
-	checkResponseCode(t, http.StatusBadRequest, response.Code)
-
-	// Bad body
-	req, _ = http.NewRequest("POST", "/count?input=bad", strings.NewReader(`invalid json`))
-	response = executeRequest(req)
-	checkResponseCode(t, http.StatusBadRequest, response.Code)
-
-	// Missing word variable
-	req, _ = http.NewRequest("GET", "/stats/", nil)
-	response = executeRequest(req)
-	checkResponseCode(t, http.StatusNotFound, response.Code)
+func (s *Server) Run(addr string) {
+	log.Fatal(http.ListenAndServe(addr, s.Router))
 }
