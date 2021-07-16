@@ -17,16 +17,16 @@ type Server struct {
 }
 
 type CountRequest struct {
-	Input string
+	Input string `json:"input"`
 }
 
 type StatsResponse struct {
-	Word  string
-	Count int64
+	Word  string `json:"word"`
+	Count int64 `json:"count"`
 }
 
 func readFromBody(text string) error {
-	return ReadToStream(strings.NewReader(text))
+	return InputWordCount(strings.NewReader(text))
 }
 
 func readFromFile(file string) error {
@@ -34,7 +34,7 @@ func readFromFile(file string) error {
 	if err != nil {
 		return err
 	}
-	return ReadToStream(emitters.Scanner(f, bufio.ScanLines))
+	return InputWordCount(emitters.Scanner(f, bufio.ScanLines))
 }
 
 func readFromUrl(url string) error {
@@ -49,10 +49,25 @@ func readFromUrl(url string) error {
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	return ReadToStream(emitters.Reader(resp.Body))
+	return InputWordCount(emitters.Reader(resp.Body))
 }
 
-func countHandler(w http.ResponseWriter, r *http.Request) {
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.WriteHeader(code)
+	if payload != nil {
+		response, _ := json.Marshal(payload)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(response)
+	}
+}
+
+// Handler for adding input to the word count
+func (s *Server) countHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract the input from the body
 	var countRequest CountRequest
 	err := json.NewDecoder(r.Body).Decode(&countRequest)
 	if err != nil {
@@ -61,6 +76,7 @@ func countHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	// Determine input type based on the 'input' path param
 	switch r.URL.Query().Get("input") {
 	case "text":
 		err = readFromBody(countRequest.Input)
@@ -81,27 +97,18 @@ func countHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func respondWithError(w http.ResponseWriter, code int, message string) {
-	respondWithJSON(w, code, map[string]string{"error": message})
-}
-
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	w.WriteHeader(code)
-	if payload != nil {
-		response, _ := json.Marshal(payload)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(response)
-	}
-}
-
-func statsHandler(w http.ResponseWriter, r *http.Request) {
+// Handler for retrieving the stats for a given word
+func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
 	word := mux.Vars(r)["word"]
+
+	// Validate input
 	if word == "" {
-		respondWithError(w, http.StatusBadRequest, "Missing word variable")
+		respondWithError(w, http.StatusBadRequest, "Missing 'word' variable")
 		return
 	}
 
-	count, err := GetCount(word)
+	// Retrieve the count from the cache
+	count, err := GetCount(strings.ToLower(word))
 	if err != nil {
 		fmt.Println(err)
 		respondWithError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
@@ -115,8 +122,8 @@ func (s *Server) Initialize() {
 	InitRedis()
 
 	s.Router = mux.NewRouter()
-	s.Router.HandleFunc("/count", countHandler).Methods("POST")
-	s.Router.HandleFunc("/stats/{word:[a-z]+}", statsHandler).Methods("GET")
+	s.Router.HandleFunc("/count", s.countHandler).Methods("POST")
+	s.Router.HandleFunc("/stats/{word:[a-z]+}", s.statsHandler).Methods("GET")
 }
 
 func (s *Server) Run(addr string) {
