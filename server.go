@@ -117,7 +117,7 @@ func (s *Server) Initialize() {
 
 	s.Router = mux.NewRouter()
 	s.Router.HandleFunc("/count", s.countHandler).Methods("POST")
-	s.Router.HandleFunc("/stats/{word:[a-z]+}", s.statsHandler).Methods("GET")
+	s.Router.HandleFunc("/stats/{word:[a-zA-Z]+}", s.statsHandler).Methods("GET")
 }
 
 func (s *Server) Run(addr string) {
