@@ -45,25 +45,44 @@ func checkStats(t *testing.T, word string, expectedCount int64) {
 }
 
 func Test_Text(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"Input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
+	req, _ := http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
 	response := executeRequest(req)
 	checkResponseCode(t, http.StatusAccepted, response.Code)
-
 	checkStats(t, "my", 3)
+
+	req, _ = http.NewRequest("POST", "/count?input=text", strings.NewReader(`{"input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
+	response = executeRequest(req)
+	checkResponseCode(t, http.StatusAccepted, response.Code)
+	checkStats(t, "my", 6)
 }
 
 func Test_File(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=file", strings.NewReader(`{"Input":"tests/file1.txt"}`))
+	req, _ := http.NewRequest("POST", "/count?input=file", strings.NewReader(`{"input":"tests/file1.txt"}`))
 	response := executeRequest(req)
 	checkResponseCode(t, http.StatusAccepted, response.Code)
-
 	checkStats(t, "hello", 32)
 }
 
 func Test_URL(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/count?input=url", strings.NewReader(`{"Input":"https://raw.githubusercontent.com/YeruchamB/word-count-server/main/tests/file2.txt"}`))
+	req, _ := http.NewRequest("POST", "/count?input=url", strings.NewReader(`{"input":"https://raw.githubusercontent.com/YeruchamB/word-count-server/main/tests/file2.txt"}`))
 	response := executeRequest(req)
 	checkResponseCode(t, http.StatusAccepted, response.Code)
-
 	checkStats(t, "drift", 8)
+}
+
+func Test_Errors(t *testing.T) {
+	// Bad input type
+	req, _ := http.NewRequest("POST", "/count?input=bad", strings.NewReader(`{"input":"Hi! My name is(what?), my name is(who?), my name is Slim Shady"}`))
+	response := executeRequest(req)
+	checkResponseCode(t, http.StatusBadRequest, response.Code)
+
+	// Bad body
+	req, _ = http.NewRequest("POST", "/count?input=bad", strings.NewReader(`invalid json`))
+	response = executeRequest(req)
+	checkResponseCode(t, http.StatusBadRequest, response.Code)
+
+	// Missing word variable
+	req, _ = http.NewRequest("GET", "/stats/", nil)
+	response = executeRequest(req)
+	checkResponseCode(t, http.StatusNotFound, response.Code)
 }
