@@ -1,10 +1,10 @@
 # Run a new redis container
 run_redis: kill_redis
-	docker run --name redis-test-instance -p 6379:6379 -d redis
+	docker run --name redis-local-instance -p 6379:6379 -d redis
 
 # Kill any running redis container
 kill_redis:
-	 docker container rm -f redis-test-instance
+	 docker container rm -f redis-local-instance
 
 run_go_tests:
 	go mod tidy
